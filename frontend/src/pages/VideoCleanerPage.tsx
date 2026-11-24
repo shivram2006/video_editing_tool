@@ -259,9 +259,149 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
   };
 
   const updateBoxTiming = (id: string, startTime?: number, endTime?: number) => {
+    const maxDur = metadata?.duration_sec || 9999;
     setBoxes((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, start_time: startTime, end_time: endTime } : b))
+      prev.map((b) => {
+        if (b.id !== id) return b;
+        let newStart = startTime !== undefined && !isNaN(startTime) ? Math.max(0, Math.min(maxDur, Math.round(startTime * 10) / 10)) : undefined;
+        let newEnd = endTime !== undefined && !isNaN(endTime) ? Math.max(0, Math.min(maxDur, Math.round(endTime * 10) / 10)) : undefined;
+
+        if (newStart !== undefined && newEnd !== undefined) {
+          if (newStart >= newEnd) {
+            if (startTime !== b.start_time) {
+              newEnd = Math.min(maxDur, Math.round((newStart + 0.5) * 10) / 10);
+            } else {
+              newStart = Math.max(0, Math.round((newEnd - 0.5) * 10) / 10);
+            }
+          }
+        }
+        return { ...b, start_time: newStart, end_time: newEnd };
+      })
     );
+  };
+
+  const adjustBoxTiming = (id: string, field: 'start' | 'end', delta: number) => {
+    if (!metadata) return;
+    const box = boxes.find((b) => b.id === id);
+    if (!box) return;
+    const maxDur = metadata.duration_sec;
+    const currentStart = box.start_time ?? 0;
+    const currentEnd = box.end_time ?? maxDur;
+
+    if (field === 'start') {
+      const targetStart = Math.max(0, Math.round((currentStart + delta) * 10) / 10);
+      let newEnd = box.end_time;
+      if (newEnd !== undefined && targetStart >= newEnd) {
+        newEnd = Math.min(maxDur, Math.round((targetStart + 0.5) * 10) / 10);
+      }
+      updateBoxTiming(id, targetStart, newEnd);
+      handleSeek(targetStart);
+    } else {
+      const targetEnd = Math.min(maxDur, Math.round((currentEnd + delta) * 10) / 10);
+      let newStart = box.start_time;
+      if (newStart !== undefined && targetEnd <= newStart) {
+        newStart = Math.max(0, Math.round((targetEnd - 0.5) * 10) / 10);
+      }
+      updateBoxTiming(id, newStart, targetEnd);
+      handleSeek(targetEnd);
+    }
+  };
+
+  const setBoxPointToPlayhead = (id: string, field: 'start' | 'end') => {
+    if (!metadata) return;
+    const box = boxes.find((b) => b.id === id);
+    if (!box) return;
+    const maxDur = metadata.duration_sec;
+    const playhead = Math.round(currentTime * 10) / 10;
+
+    if (field === 'start') {
+      let newEnd = box.end_time;
+      if (newEnd !== undefined && playhead >= newEnd) {
+        newEnd = Math.min(maxDur, Math.round((playhead + 0.5) * 10) / 10);
+      }
+      updateBoxTiming(id, playhead, newEnd);
+      handleSeek(playhead);
+    } else {
+      let newStart = box.start_time;
+      if (newStart !== undefined && playhead <= newStart) {
+        newStart = Math.max(0, Math.round((playhead - 0.5) * 10) / 10);
+      }
+      updateBoxTiming(id, newStart, playhead);
+      handleSeek(playhead);
+    }
+  };
+
+  const updateTextOverlayTiming = (id: string, startTime?: number, endTime?: number) => {
+    const maxDur = metadata?.duration_sec || 9999;
+    setTextOverlays((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        let newStart = startTime !== undefined && !isNaN(startTime) ? Math.max(0, Math.min(maxDur, Math.round(startTime * 10) / 10)) : undefined;
+        let newEnd = endTime !== undefined && !isNaN(endTime) ? Math.max(0, Math.min(maxDur, Math.round(endTime * 10) / 10)) : undefined;
+
+        if (newStart !== undefined && newEnd !== undefined) {
+          if (newStart >= newEnd) {
+            if (startTime !== t.start_time) {
+              newEnd = Math.min(maxDur, Math.round((newStart + 0.5) * 10) / 10);
+            } else {
+              newStart = Math.max(0, Math.round((newEnd - 0.5) * 10) / 10);
+            }
+          }
+        }
+        return { ...t, start_time: newStart, end_time: newEnd };
+      })
+    );
+  };
+
+  const adjustTextOverlayTiming = (id: string, field: 'start' | 'end', delta: number) => {
+    if (!metadata) return;
+    const text = textOverlays.find((t) => t.id === id);
+    if (!text) return;
+    const maxDur = metadata.duration_sec;
+    const currentStart = text.start_time ?? 0;
+    const currentEnd = text.end_time ?? maxDur;
+
+    if (field === 'start') {
+      const targetStart = Math.max(0, Math.round((currentStart + delta) * 10) / 10);
+      let newEnd = text.end_time;
+      if (newEnd !== undefined && targetStart >= newEnd) {
+        newEnd = Math.min(maxDur, Math.round((targetStart + 0.5) * 10) / 10);
+      }
+      updateTextOverlayTiming(id, targetStart, newEnd);
+      handleSeek(targetStart);
+    } else {
+      const targetEnd = Math.min(maxDur, Math.round((currentEnd + delta) * 10) / 10);
+      let newStart = text.start_time;
+      if (newStart !== undefined && targetEnd <= newStart) {
+        newStart = Math.max(0, Math.round((targetEnd - 0.5) * 10) / 10);
+      }
+      updateTextOverlayTiming(id, newStart, targetEnd);
+      handleSeek(targetEnd);
+    }
+  };
+
+  const setTextOverlayPointToPlayhead = (id: string, field: 'start' | 'end') => {
+    if (!metadata) return;
+    const text = textOverlays.find((t) => t.id === id);
+    if (!text) return;
+    const maxDur = metadata.duration_sec;
+    const playhead = Math.round(currentTime * 10) / 10;
+
+    if (field === 'start') {
+      let newEnd = text.end_time;
+      if (newEnd !== undefined && playhead >= newEnd) {
+        newEnd = Math.min(maxDur, Math.round((playhead + 0.5) * 10) / 10);
+      }
+      updateTextOverlayTiming(id, playhead, newEnd);
+      handleSeek(playhead);
+    } else {
+      let newStart = text.start_time;
+      if (newStart !== undefined && playhead <= newStart) {
+        newStart = Math.max(0, Math.round((playhead - 0.5) * 10) / 10);
+      }
+      updateTextOverlayTiming(id, newStart, playhead);
+      handleSeek(playhead);
+    }
   };
 
   // Cut segment operations
@@ -1469,70 +1609,181 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   if (!selectedBox) return null;
 
                   return (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-purple-500/40 bg-purple-950/40 px-4 py-3 shadow-xl backdrop-blur-md animate-fadeIn">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                          <Clock className="h-4 w-4" />
-                        </div>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-white">
-                              Target Timestamp: <span className="text-purple-300 font-semibold">{selectedBox.label}</span>
-                            </span>
-                            <span className="rounded bg-purple-900/70 px-1.5 py-0.5 text-[10px] font-mono text-purple-200 border border-purple-400/40">
-                              {selectedBox.start_time != null
-                                ? `${formatSec(selectedBox.start_time)} → ${selectedBox.end_time != null ? formatSec(selectedBox.end_time) : 'End'}`
-                                : '0:00 → End (Full Video)'}
+                    <div className="flex flex-col gap-3 rounded-2xl border border-purple-500/40 bg-purple-950/40 p-4 shadow-xl backdrop-blur-md animate-fadeIn">
+                      {/* Top Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-2.5 border-b border-purple-500/20">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            <Clock className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-white">
+                                Target Timing: <span className="text-purple-300 font-semibold">{selectedBox.label}</span>
+                              </span>
+                              <span className="rounded bg-purple-900/70 px-2 py-0.5 text-[11px] font-mono text-purple-200 border border-purple-400/40">
+                                {selectedBox.start_time != null || selectedBox.end_time != null
+                                  ? `${formatSec(selectedBox.start_time ?? 0)} → ${selectedBox.end_time != null ? formatSec(selectedBox.end_time) : formatSec(metadata.duration_sec)}`
+                                  : '0:00 → End (Full Video)'}
+                              </span>
+                              {selectedBox.start_time != null || selectedBox.end_time != null ? (
+                                <span className="text-[10px] text-purple-300/80 font-mono">
+                                  ({Math.round(((selectedBox.end_time ?? metadata.duration_sec) - (selectedBox.start_time ?? 0)) * 10) / 10}s active)
+                                </span>
+                              ) : null}
+                            </div>
+                            <span className="text-[11px] text-slate-400">
+                              {selectedBox.start_time != null || selectedBox.end_time != null
+                                ? `Watermark will ONLY be removed between ${formatSec(selectedBox.start_time ?? 0)} and ${selectedBox.end_time != null ? formatSec(selectedBox.end_time) : 'the end of video'}.`
+                                : 'Watermark is removed across the entire video duration.'}
                             </span>
                           </div>
-                          <span className="text-[11px] text-slate-400">
-                            {selectedBox.start_time != null
-                              ? `Overlay is ONLY removed starting at ${formatSec(selectedBox.start_time)}. Frames before ${formatSec(selectedBox.start_time)} remain 100% untouched.`
-                              : 'Overlay is removed across the entire video duration.'}
-                          </span>
                         </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateBoxTiming(
-                              selectedBox.id,
-                              Math.round(currentTime * 10) / 10,
-                              selectedBox.end_time
-                            )
-                          }
-                          className="flex items-center gap-1.5 rounded-xl border border-purple-500/50 bg-purple-500/20 px-3 py-1.5 font-medium text-purple-200 hover:bg-purple-500/30 hover:border-purple-400 transition-all shadow-sm"
-                          title="Set start time to current playhead position"
-                        >
-                          <span>⏱️ Set Start: <strong>{formatSec(currentTime)}</strong></span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateBoxTiming(
-                              selectedBox.id,
-                              selectedBox.start_time,
-                              Math.round(currentTime * 10) / 10
-                            )
-                          }
-                          className="flex items-center gap-1.5 rounded-xl border border-indigo-500/50 bg-indigo-500/20 px-3 py-1.5 font-medium text-indigo-200 hover:bg-indigo-500/30 hover:border-indigo-400 transition-all shadow-sm"
-                          title="Set end time to current playhead position"
-                        >
-                          <span>⏱️ Set End: <strong>{formatSec(currentTime)}</strong></span>
-                        </button>
 
                         <button
                           type="button"
                           onClick={() => updateBoxTiming(selectedBox.id, undefined, undefined)}
-                          className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 transition-all"
-                          title="Apply watermark removal to the entire video"
+                          className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition-all shadow-sm ${
+                            selectedBox.start_time == null && selectedBox.end_time == null
+                              ? 'border-purple-500 bg-purple-600/30 text-white font-bold ring-1 ring-purple-400'
+                              : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                          }`}
+                          title="Apply watermark removal to the entire video (0:00 to end)"
                         >
-                          <RotateCcw className="h-3 w-3" />
+                          <RotateCcw className="h-3.5 w-3.5" />
                           <span>Full Video</span>
                         </button>
+                      </div>
+
+                      {/* Independent Start (In) and End (Out) Control Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {/* Start (In-Point) Card */}
+                        <div className="rounded-xl border border-purple-500/30 bg-black/40 p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-purple-300 flex items-center gap-1.5">
+                              <span>⏱️ Start Time:</span>
+                              <span className="font-mono text-white text-xs bg-purple-900/80 px-2 py-0.5 rounded border border-purple-400/40">
+                                {selectedBox.start_time != null ? formatSec(selectedBox.start_time) : '0:00.0 (Video Start)'}
+                              </span>
+                            </span>
+                            {selectedBox.start_time != null && (
+                              <button
+                                type="button"
+                                onClick={() => handleSeek(selectedBox.start_time!)}
+                                className="text-[10px] text-purple-300 hover:text-white underline cursor-pointer"
+                              >
+                                Jump to Frame
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'start', -1.0)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step backward 1.0 second"
+                            >
+                              -1.0s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'start', -0.1)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step backward 0.1 second"
+                            >
+                              -0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'start', 0.1)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step forward 0.1 second"
+                            >
+                              +0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'start', 1.0)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step forward 1.0 second"
+                            >
+                              +1.0s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBoxPointToPlayhead(selectedBox.id, 'start')}
+                              className="flex-1 rounded-lg border border-purple-500/50 bg-purple-600/30 py-1 text-[11px] font-bold text-purple-100 hover:bg-purple-600/50 transition-all text-center truncate shadow-sm ml-1"
+                              title="Set Start to current playhead timestamp"
+                            >
+                              📍 Playhead ({formatSec(currentTime)})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* End (Out-Point) Card */}
+                        <div className="rounded-xl border border-indigo-500/30 bg-black/40 p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                              <span>⏱️ End Time:</span>
+                              <span className="font-mono text-white text-xs bg-indigo-900/80 px-2 py-0.5 rounded border border-indigo-400/40">
+                                {selectedBox.end_time != null ? formatSec(selectedBox.end_time) : `${formatSec(metadata.duration_sec)} (End)`}
+                              </span>
+                            </span>
+                            {selectedBox.end_time != null && (
+                              <button
+                                type="button"
+                                onClick={() => handleSeek(selectedBox.end_time!)}
+                                className="text-[10px] text-indigo-300 hover:text-white underline cursor-pointer"
+                              >
+                                Jump to Frame
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'end', -1.0)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step backward 1.0 second"
+                            >
+                              -1.0s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'end', -0.1)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step backward 0.1 second"
+                            >
+                              -0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'end', 0.1)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step forward 0.1 second"
+                            >
+                              +0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => adjustBoxTiming(selectedBox.id, 'end', 1.0)}
+                              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-mono text-slate-300 hover:bg-white/10 hover:text-white"
+                              title="Step forward 1.0 second"
+                            >
+                              +1.0s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBoxPointToPlayhead(selectedBox.id, 'end')}
+                              className="flex-1 rounded-lg border border-indigo-500/50 bg-indigo-600/30 py-1 text-[11px] font-bold text-indigo-100 hover:bg-indigo-600/50 transition-all text-center truncate shadow-sm ml-1"
+                              title="Set End to current playhead timestamp"
+                            >
+                              📍 Playhead ({formatSec(currentTime)})
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Text Replacement Input & Style for Watermark */}
@@ -1820,50 +2071,157 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                           </div>
                         </div>
 
-                        {/* Timing Controls */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-cyan-500/20 text-xs">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-3.5 w-3.5 text-cyan-400" />
-                            <span className="text-[11px] text-slate-400">Replaced During:</span>
-                            <span className="rounded bg-cyan-900/60 px-2 py-0.5 text-[10px] font-mono text-cyan-200 border border-cyan-400/30">
-                              {selectedBox.start_time != null
-                                ? `${formatSec(selectedBox.start_time)} → ${selectedBox.end_time != null ? formatSec(selectedBox.end_time) : 'End'}`
-                                : '0:00 → End (Full Video)'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateBoxTiming(selectedBox.id, Math.round(currentTime * 10) / 10, selectedBox.end_time)
-                              }
-                              className="flex items-center gap-1 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25 transition-all"
-                              title="Replace starting from current playhead"
-                            >
-                              <span>⏱️ Set Start: {formatSec(currentTime)}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateBoxTiming(selectedBox.id, selectedBox.start_time, Math.round(currentTime * 10) / 10)
-                              }
-                              className="flex items-center gap-1 rounded-xl border border-blue-500/40 bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-200 hover:bg-blue-500/25 transition-all"
-                              title="Replace ending at current playhead"
-                            >
-                              <span>⏱️ Set End: {formatSec(currentTime)}</span>
-                            </button>
+                        {/* Dual Independent Timing Controls */}
+                        <div className="flex flex-col gap-2.5 pt-2.5 border-t border-cyan-500/20 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                              <span className="text-[11px] text-slate-400">Replaced Duration:</span>
+                              <span className="rounded bg-cyan-900/60 px-2 py-0.5 text-[10px] font-mono text-cyan-200 border border-cyan-400/30">
+                                {selectedBox.start_time != null || selectedBox.end_time != null
+                                  ? `${formatSec(selectedBox.start_time ?? 0)} → ${selectedBox.end_time != null ? formatSec(selectedBox.end_time) : formatSec(metadata.duration_sec)}`
+                                  : '0:00 → End (Full Video)'}
+                              </span>
+                              {selectedBox.start_time != null || selectedBox.end_time != null ? (
+                                <span className="text-[10px] text-cyan-300/80 font-mono">
+                                  ({Math.round(((selectedBox.end_time ?? metadata.duration_sec) - (selectedBox.start_time ?? 0)) * 10) / 10}s active)
+                                </span>
+                              ) : null}
+                            </div>
 
                             <button
                               type="button"
                               onClick={() => updateBoxTiming(selectedBox.id, undefined, undefined)}
-                              className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10 transition-all"
+                              className={`flex items-center gap-1 rounded-xl border px-2.5 py-1 text-xs transition-all ${
+                                selectedBox.start_time == null && selectedBox.end_time == null
+                                  ? 'border-cyan-400 bg-cyan-500/30 text-white font-bold ring-1 ring-cyan-300'
+                                  : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                              }`}
                               title="Replace across the entire video"
                             >
                               <RotateCcw className="h-3 w-3" />
                               <span>Full Video</span>
                             </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {/* Start Time Card */}
+                            <div className="rounded-xl border border-cyan-500/30 bg-black/40 p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                                  <span>Start:</span>
+                                  <span className="font-mono text-white text-xs bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-400/30">
+                                    {selectedBox.start_time != null ? formatSec(selectedBox.start_time) : '0:00.0 (Start)'}
+                                  </span>
+                                </span>
+                                {selectedBox.start_time != null && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSeek(selectedBox.start_time!)}
+                                    className="text-[10px] text-cyan-300 hover:text-white underline cursor-pointer"
+                                  >
+                                    Jump
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'start', -1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'start', -0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'start', 0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'start', 1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBoxPointToPlayhead(selectedBox.id, 'start')}
+                                  className="flex-1 rounded border border-cyan-500/40 bg-cyan-600/30 py-0.5 text-[10px] font-bold text-cyan-100 hover:bg-cyan-600/50 truncate text-center"
+                                  title="Set Start to current playhead position"
+                                >
+                                  📍 Playhead ({formatSec(currentTime)})
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* End Time Card */}
+                            <div className="rounded-xl border border-blue-500/30 bg-black/40 p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                                  <span>End:</span>
+                                  <span className="font-mono text-white text-xs bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-400/30">
+                                    {selectedBox.end_time != null ? formatSec(selectedBox.end_time) : `${formatSec(metadata.duration_sec)} (End)`}
+                                  </span>
+                                </span>
+                                {selectedBox.end_time != null && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSeek(selectedBox.end_time!)}
+                                    className="text-[10px] text-blue-300 hover:text-white underline cursor-pointer"
+                                  >
+                                    Jump
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'end', -1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'end', -0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'end', 0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustBoxTiming(selectedBox.id, 'end', 1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBoxPointToPlayhead(selectedBox.id, 'end')}
+                                  className="flex-1 rounded border border-blue-500/40 bg-blue-600/30 py-0.5 text-[10px] font-bold text-blue-100 hover:bg-blue-600/50 truncate text-center"
+                                  title="Set End to current playhead position"
+                                >
+                                  📍 Playhead ({formatSec(currentTime)})
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1979,56 +2337,159 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                           </div>
                         </div>
 
-                        {/* Timing Controls */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-cyan-500/20 text-xs">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-3.5 w-3.5 text-cyan-400" />
-                            <span className="text-[11px] text-slate-400">Display Duration:</span>
-                            <span className="rounded bg-cyan-900/60 px-2 py-0.5 text-[10px] font-mono text-cyan-200 border border-cyan-400/30">
-                              {selectedText.start_time != null
-                                ? `${formatSec(selectedText.start_time)} → ${selectedText.end_time != null ? formatSec(selectedText.end_time) : 'End'}`
-                                : '0:00 → End (Full Video)'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateTextOverlay(selectedText.id, {
-                                  start_time: Math.round(currentTime * 10) / 10,
-                                })
-                              }
-                              className="flex items-center gap-1 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25 transition-all"
-                            >
-                              <span>⏱️ Set Start: {formatSec(currentTime)}</span>
-                            </button>
+                        {/* Dual Independent Timing Controls */}
+                        <div className="flex flex-col gap-2.5 pt-2 border-t border-cyan-500/20 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                              <span className="text-[11px] text-slate-400">Display Duration:</span>
+                              <span className="rounded bg-cyan-900/60 px-2 py-0.5 text-[10px] font-mono text-cyan-200 border border-cyan-400/30">
+                                {selectedText.start_time != null || selectedText.end_time != null
+                                  ? `${formatSec(selectedText.start_time ?? 0)} → ${selectedText.end_time != null ? formatSec(selectedText.end_time) : formatSec(metadata.duration_sec)}`
+                                  : '0:00 → End (Full Video)'}
+                              </span>
+                              {selectedText.start_time != null || selectedText.end_time != null ? (
+                                <span className="text-[10px] text-cyan-300/80 font-mono">
+                                  ({Math.round(((selectedText.end_time ?? metadata.duration_sec) - (selectedText.start_time ?? 0)) * 10) / 10}s active)
+                                </span>
+                              ) : null}
+                            </div>
 
                             <button
                               type="button"
                               onClick={() =>
-                                updateTextOverlay(selectedText.id, {
-                                  end_time: Math.round(currentTime * 10) / 10,
-                                })
+                                updateTextOverlayTiming(selectedText.id, undefined, undefined)
                               }
-                              className="flex items-center gap-1 rounded-xl border border-blue-500/40 bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-200 hover:bg-blue-500/25 transition-all"
-                            >
-                              <span>⏱️ Set End: {formatSec(currentTime)}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateTextOverlay(selectedText.id, {
-                                  start_time: undefined,
-                                  end_time: undefined,
-                                })
-                              }
-                              className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10 transition-all"
+                              className={`flex items-center gap-1 rounded-xl border px-2.5 py-1 text-xs transition-all ${
+                                selectedText.start_time == null && selectedText.end_time == null
+                                  ? 'border-cyan-400 bg-cyan-500/30 text-white font-bold ring-1 ring-cyan-300'
+                                  : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                              }`}
+                              title="Display across the entire video"
                             >
                               <RotateCcw className="h-3 w-3" />
                               <span>Full Video</span>
                             </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {/* Start Time Card */}
+                            <div className="rounded-xl border border-cyan-500/30 bg-black/40 p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                                  <span>Start:</span>
+                                  <span className="font-mono text-white text-xs bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-400/30">
+                                    {selectedText.start_time != null ? formatSec(selectedText.start_time) : '0:00.0 (Start)'}
+                                  </span>
+                                </span>
+                                {selectedText.start_time != null && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSeek(selectedText.start_time!)}
+                                    className="text-[10px] text-cyan-300 hover:text-white underline cursor-pointer"
+                                  >
+                                    Jump
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'start', -1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'start', -0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'start', 0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'start', 1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setTextOverlayPointToPlayhead(selectedText.id, 'start')}
+                                  className="flex-1 rounded border border-cyan-500/40 bg-cyan-600/30 py-0.5 text-[10px] font-bold text-cyan-100 hover:bg-cyan-600/50 truncate text-center"
+                                  title="Set Start to current playhead position"
+                                >
+                                  📍 Playhead ({formatSec(currentTime)})
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* End Time Card */}
+                            <div className="rounded-xl border border-blue-500/30 bg-black/40 p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                                  <span>End:</span>
+                                  <span className="font-mono text-white text-xs bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-400/30">
+                                    {selectedText.end_time != null ? formatSec(selectedText.end_time) : `${formatSec(metadata.duration_sec)} (End)`}
+                                  </span>
+                                </span>
+                                {selectedText.end_time != null && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSeek(selectedText.end_time!)}
+                                    className="text-[10px] text-blue-300 hover:text-white underline cursor-pointer"
+                                  >
+                                    Jump
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'end', -1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'end', -0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  -0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'end', 0.1)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +0.1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adjustTextOverlayTiming(selectedText.id, 'end', 1.0)}
+                                  className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-mono text-slate-300 hover:bg-white/10"
+                                >
+                                  +1s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setTextOverlayPointToPlayhead(selectedText.id, 'end')}
+                                  className="flex-1 rounded border border-blue-500/40 bg-blue-600/30 py-0.5 text-[10px] font-bold text-blue-100 hover:bg-blue-600/50 truncate text-center"
+                                  title="Set End to current playhead position"
+                                >
+                                  📍 Playhead ({formatSec(currentTime)})
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>

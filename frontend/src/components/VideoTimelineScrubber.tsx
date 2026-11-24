@@ -333,10 +333,11 @@ export const VideoTimelineScrubber: React.FC<VideoTimelineScrubberProps> = ({
         {textOverlays && textOverlays.length > 0 && (
           <div className="absolute top-1 left-0 right-0 z-10 flex flex-col gap-0.5 px-1 pointer-events-none">
             {textOverlays.map((to) => {
-              const start = to.start_time ?? 0;
+              const start = Math.max(0, to.start_time ?? 0);
               const end = to.end_time ?? metadata.duration_sec;
+              const safeEnd = Math.max(start + 0.1, end);
               const leftPct = (start / metadata.duration_sec) * 100;
-              const widthPct = Math.max(4, ((end - start) / metadata.duration_sec) * 100);
+              const widthPct = Math.max(2, Math.min(100 - leftPct, ((safeEnd - start) / metadata.duration_sec) * 100));
               const isSelected = selectedTextId === to.id;
 
               return (
@@ -369,10 +370,11 @@ export const VideoTimelineScrubber: React.FC<VideoTimelineScrubberProps> = ({
         {boxes && boxes.length > 0 && (
           <div className="absolute bottom-1.5 left-0 right-0 z-10 flex flex-col gap-1 px-1 pointer-events-none">
             {boxes.map((b) => {
-              const start = b.start_time ?? 0;
+              const start = Math.max(0, b.start_time ?? 0);
               const end = b.end_time ?? metadata.duration_sec;
+              const safeEnd = Math.max(start + 0.1, end);
               const leftPct = (start / metadata.duration_sec) * 100;
-              const widthPct = Math.max(2, ((end - start) / metadata.duration_sec) * 100);
+              const widthPct = Math.max(2, Math.min(100 - leftPct, ((safeEnd - start) / metadata.duration_sec) * 100));
               const isSelected = selectedBoxId === b.id;
 
               return (
