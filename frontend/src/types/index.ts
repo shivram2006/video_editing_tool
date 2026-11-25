@@ -54,6 +54,37 @@ export interface AudioTrackInfo {
   file_size: number;
 }
 
+export interface TranscribeSegment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  timestamp: string;
+}
+
+export interface TranscribeResponse {
+  media_id: string;
+  full_text: string;
+  language: string;
+  segments: TranscribeSegment[];
+  srt_content: string;
+  vtt_content: string;
+}
+
+export interface TTSVoice {
+  id: string;
+  name: string;
+  language: string;
+  gender: string;
+}
+
+export interface TTSRequest {
+  text: string;
+  voice: string;
+  rate?: string;
+  pitch?: string;
+}
+
 export interface VideoProcessRequest {
   media_id: string;
   boxes?: BoundingBox[];

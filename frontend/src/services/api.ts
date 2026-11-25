@@ -12,6 +12,9 @@ import {
   PricingPlan,
   SampleMedia,
   AudioTrackInfo,
+  TranscribeResponse,
+  TTSVoice,
+  TTSRequest,
 } from '../types';
 
 const API_BASE = '/api';
@@ -106,6 +109,51 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Audio upload failed' }));
       throw new Error(err.detail || 'Audio upload failed');
+    }
+    return res.json();
+  },
+
+  async extractAudio(media_id: string, format: 'mp3' | 'wav' = 'mp3'): Promise<AudioTrackInfo> {
+    const res = await fetch(`${API_BASE}/videos/extract-audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_id, format }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Audio extraction failed' }));
+      throw new Error(err.detail || 'Audio extraction failed');
+    }
+    return res.json();
+  },
+
+  async transcribeVideo(media_id: string, language: string = 'hi-IN', chunk_duration: number = 6): Promise<TranscribeResponse> {
+    const res = await fetch(`${API_BASE}/videos/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_id, language, chunk_duration }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Transcription failed' }));
+      throw new Error(err.detail || 'Transcription failed');
+    }
+    return res.json();
+  },
+
+  async getTTSVoices(): Promise<TTSVoice[]> {
+    const res = await fetch(`${API_BASE}/videos/tts-voices`);
+    if (!res.ok) throw new Error('Failed to load TTS voices');
+    return res.json();
+  },
+
+  async generateTTS(params: TTSRequest): Promise<AudioTrackInfo> {
+    const res = await fetch(`${API_BASE}/videos/text-to-speech`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Voice generation failed' }));
+      throw new Error(err.detail || 'Voice generation failed');
     }
     return res.json();
   },

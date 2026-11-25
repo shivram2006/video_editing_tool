@@ -35,11 +35,30 @@ import {
   Music,
   Headphones,
   Radio,
+  FileText,
+  Mic,
+  Copy,
+  Check,
+  FileDown,
+  Languages,
+  ListOrdered,
 } from 'lucide-react';
 import { VideoTimelineScrubber } from '../components/VideoTimelineScrubber';
 import { ProcessingProgressModal } from '../components/ProcessingProgressModal';
 import { LegalConfirmationModal } from '../components/LegalConfirmationModal';
-import { BoundingBox, VideoMetadata, VideoJobStatus, DetectionResult, CutRange, InsertClip, TextOverlay, AudioTrackInfo } from '../types';
+import {
+  BoundingBox,
+  VideoMetadata,
+  VideoJobStatus,
+  DetectionResult,
+  CutRange,
+  InsertClip,
+  TextOverlay,
+  AudioTrackInfo,
+  TranscribeResponse,
+  TranscribeSegment,
+  TTSVoice,
+} from '../types';
 import { api } from '../services/api';
 
 interface VideoCleanerProps {
@@ -65,8 +84,8 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
   const [selectTool, setSelectTool] = useState<'draw' | 'select'>('draw');
 
-  // Studio Mode: 'watermark' | 'text' | 'cut_stitch' | 'audio'
-  const [studioMode, setStudioMode] = useState<'watermark' | 'text' | 'cut_stitch' | 'audio'>('watermark');
+  // Studio Mode: 'watermark' | 'text' | 'cut_stitch' | 'audio' | 'transcribe'
+  const [studioMode, setStudioMode] = useState<'watermark' | 'text' | 'cut_stitch' | 'audio' | 'transcribe'>('watermark');
 
   // Text Overlays & Replacement state
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
@@ -92,6 +111,26 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
   const [isPlayingAudioPreview, setIsPlayingAudioPreview] = useState<boolean>(false);
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
   const audioFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Video to Audio (Extraction) state
+  const [isExtractingAudio, setIsExtractingAudio] = useState<boolean>(false);
+  const [extractedAudio, setExtractedAudio] = useState<AudioTrackInfo | null>(null);
+  const [extractAudioError, setExtractAudioError] = useState<string | null>(null);
+
+  // Text to Audio (AI Voice TTS) state
+  const [ttsText, setTtsText] = useState<string>('');
+  const [ttsVoice, setTtsVoice] = useState<string>('hi-IN-MadhurNeural');
+  const [ttsVoicesList, setTtsVoicesList] = useState<TTSVoice[]>([]);
+  const [isGeneratingTTS, setIsGeneratingTTS] = useState<boolean>(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+
+  // Video to Text (Transcribe & Subtitles) state
+  const [transcribeLang, setTranscribeLang] = useState<string>('hi-IN');
+  const [transcribeChunkDuration, setTranscribeChunkDuration] = useState<number>(6);
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
+  const [transcriptionResult, setTranscriptionResult] = useState<TranscribeResponse | null>(null);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [isCopiedTranscript, setIsCopiedTranscript] = useState<boolean>(false);
 
   const [interaction, setInteraction] = useState<{
     type: 'draw' | 'move' | 'resize';
@@ -1012,6 +1051,127 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
     }
   };
 
+  // Load TTS voices list
+  useEffect(() => {
+    api
+      .getTTSVoices()
+      .then((voices) => {
+        if (voices && voices.length > 0) {
+          setTtsVoicesList(voices);
+          setTtsVoice(voices[0].id);
+        }
+      })
+      .catch((err) => console.error('Failed to load TTS voices', err));
+  }, []);
+
+  // Video to Audio: Extract MP3/WAV from video
+  const handleExtractAudio = async (format: 'mp3' | 'wav' = 'mp3') => {
+    if (!metadata) return;
+    setIsExtractingAudio(true);
+    setExtractAudioError(null);
+    try {
+      const res = await api.extractAudio(metadata.media_id, format);
+      setExtractedAudio(res);
+    } catch (err: any) {
+      setExtractAudioError(err.message || 'Audio extraction failed');
+    } finally {
+      setIsExtractingAudio(false);
+    }
+  };
+
+  // Text to Audio: Generate AI Voiceover (TTS)
+  const handleGenerateTTS = async () => {
+    if (!ttsText.trim()) return;
+    setIsGeneratingTTS(true);
+    setTtsError(null);
+    try {
+      const res = await api.generateTTS({
+        text: ttsText.trim(),
+        voice: ttsVoice,
+      });
+      setUploadedAudio(res);
+      if (audioMode === 'original' || audioMode === 'mute') {
+        setAudioMode('replace');
+      }
+    } catch (err: any) {
+      setTtsError(err.message || 'Voice generation failed');
+    } finally {
+      setIsGeneratingTTS(false);
+    }
+  };
+
+  // Video to Text: Transcribe video speech to text and subtitles
+  const handleTranscribeVideo = async () => {
+    if (!metadata) return;
+    setIsTranscribing(true);
+    setTranscribeError(null);
+    try {
+      const res = await api.transcribeVideo(
+        metadata.media_id,
+        transcribeLang,
+        transcribeChunkDuration
+      );
+      setTranscriptionResult(res);
+    } catch (err: any) {
+      setTranscribeError(err.message || 'Transcription failed');
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleDownloadTranscriptFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyTranscript = () => {
+    if (!transcriptionResult?.full_text) return;
+    navigator.clipboard.writeText(transcriptionResult.full_text);
+    setIsCopiedTranscript(true);
+    setTimeout(() => setIsCopiedTranscript(false), 2000);
+  };
+
+  const handleAddSubtitleSegmentAsOverlay = (seg: TranscribeSegment) => {
+    const newOverlay: TextOverlay = {
+      id: `sub_${Date.now()}_${seg.id}`,
+      text: seg.text,
+      x: Math.round(((metadata?.width || 1080) - 600) / 2),
+      y: (metadata?.height || 1920) - 180,
+      font_size: 34,
+      font_color: 'white',
+      bg_color: 'black@0.6',
+      start_time: seg.start,
+      end_time: seg.end,
+    };
+    setTextOverlays((prev) => [...prev, newOverlay]);
+    setSelectedTextId(newOverlay.id);
+    setStudioMode('text');
+  };
+
+  const handleBurnAllSubtitles = () => {
+    if (!transcriptionResult?.segments || !metadata) return;
+    const newOverlays: TextOverlay[] = transcriptionResult.segments.map((seg) => ({
+      id: `sub_${Date.now()}_${seg.id}`,
+      text: seg.text,
+      x: Math.round(((metadata.width || 1080) - 600) / 2),
+      y: (metadata.height || 1920) - 180,
+      font_size: 34,
+      font_color: 'white',
+      bg_color: 'black@0.6',
+      start_time: seg.start,
+      end_time: seg.end,
+    }));
+    setTextOverlays((prev) => [...prev, ...newOverlays]);
+    setStudioMode('text');
+  };
+
   // Processing trigger
   const handleStartProcess = () => {
     if (!metadata) return;
@@ -1214,6 +1374,24 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => setStudioMode('transcribe')}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 px-3 text-xs font-bold transition-all ${
+                  studioMode === 'transcribe'
+                    ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-500 text-white shadow-md shadow-amber-500/25 ring-1 ring-amber-400/40'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <FileText className="h-4 w-4" />
+                <span>AI Subtitles & Transcribe</span>
+                {transcriptionResult && (
+                  <span className="ml-1 rounded-full bg-amber-950/80 px-1.5 py-0.5 text-[10px] text-amber-200 border border-amber-400/30 font-mono">
+                    {transcriptionResult.segments.length} subs
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Context Toolbar */}
@@ -1338,7 +1516,7 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   Playhead: {formatSec(currentTime)}
                 </div>
               </div>
-            ) : (
+            ) : studioMode === 'audio' ? (
               /* AUDIO STUDIO TOOLBAR */
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-2.5 shadow-xl backdrop-blur-md">
                 <div className="flex items-center gap-2 text-xs font-semibold text-emerald-200">
@@ -1377,6 +1555,41 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                       <span>{isPlayingAudioPreview ? 'Pause Audio' : 'Preview Audio'}</span>
                     </button>
                   )}
+                </div>
+              </div>
+            ) : (
+              /* AI TRANSCRIBE & SUBTITLES TOOLBAR */
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-950/20 px-4 py-2.5 shadow-xl backdrop-blur-md">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-200">
+                  <FileText className="h-4 w-4 text-amber-400" />
+                  <span>AI Subtitles & Video-to-Text:</span>
+                  <span className="text-[11px] text-slate-300 font-normal">
+                    {transcriptionResult
+                      ? `Generated ${transcriptionResult.segments.length} timestamped subtitle segments`
+                      : 'Transcribe speech in video to text & auto-generate captions'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <select
+                    value={transcribeLang}
+                    onChange={(e) => setTranscribeLang(e.target.value)}
+                    className="rounded-lg border border-amber-500/40 bg-[#0f141f] px-2.5 py-1 text-xs font-semibold text-amber-200 focus:outline-none"
+                  >
+                    <option value="hi-IN">Hindi (भारत)</option>
+                    <option value="en-IN">English (India)</option>
+                    <option value="en-US">English (US)</option>
+                    <option value="es-ES">Spanish</option>
+                    <option value="fr-FR">French</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleTranscribeVideo}
+                    disabled={isTranscribing}
+                    className="flex items-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/20 px-3 py-1 font-bold text-amber-200 hover:bg-amber-500/30 transition-all cursor-pointer"
+                  >
+                    {isTranscribing ? <Wand2 className="h-3 w-3 animate-spin" /> : <Mic className="h-3 w-3" />}
+                    <span>{isTranscribing ? 'Transcribing...' : 'Transcribe Now'}</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -3201,7 +3414,7 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   )}
                 </div>
               </div>
-            ) : (
+            ) : studioMode === 'audio' ? (
               /* AUDIO STUDIO WORKSTATION */
               <div className="flex flex-col gap-4">
                 {/* Audio Master Control Header */}
@@ -3568,6 +3781,306 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Video to Audio (Audio Extractor) & Text to Audio (AI Voiceover) Tools */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Tool 1: Video to Audio Extractor */}
+                  <div className="rounded-2xl border border-cyan-500/30 bg-[#0c141d]/90 p-4 shadow-xl backdrop-blur-md flex flex-col justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                          <FileDown className="h-4 w-4" />
+                        </div>
+                        <h4 className="text-xs font-bold text-white">Video to Audio Extractor</h4>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Extract sound stream from this video into lossless MP3 or WAV format.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExtractAudio('mp3')}
+                        disabled={isExtractingAudio}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-cyan-500/50 bg-cyan-600/30 hover:bg-cyan-600/50 py-2 px-3 text-xs font-bold text-cyan-100 transition-all cursor-pointer"
+                      >
+                        {isExtractingAudio ? <Wand2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                        <span>{isExtractingAudio ? 'Extracting...' : 'Extract as MP3'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExtractAudio('wav')}
+                        disabled={isExtractingAudio}
+                        className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 py-2 px-3 text-xs font-semibold text-slate-300 transition-all cursor-pointer"
+                      >
+                        <span>WAV</span>
+                      </button>
+                    </div>
+
+                    {extractAudioError && (
+                      <p className="text-[11px] text-rose-300">{extractAudioError}</p>
+                    )}
+
+                    {extractedAudio && (
+                      <div className="rounded-xl border border-cyan-500/30 bg-black/40 p-2.5 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-white truncate max-w-[180px]">{extractedAudio.filename}</span>
+                          <span className="font-mono text-cyan-300 text-[10px]">{(extractedAudio.file_size / (1024 * 1024)).toFixed(2)} MB</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={extractedAudio.url}
+                            download={extractedAudio.original_name}
+                            className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-cyan-500 text-black py-1.5 px-2 text-xs font-bold hover:bg-cyan-400 transition-all"
+                          >
+                            <Download className="h-3 w-3" />
+                            <span>Download Audio</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUploadedAudio(extractedAudio);
+                              setAudioMode('replace');
+                            }}
+                            className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-cyan-400/40 bg-cyan-500/20 py-1.5 px-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/30 transition-all cursor-pointer"
+                          >
+                            <span>Use in Studio</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tool 2: Text to Audio (AI Voiceover) Generator */}
+                  <div className="rounded-2xl border border-purple-500/30 bg-[#120f1f]/90 p-4 shadow-xl backdrop-blur-md flex flex-col justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          <Mic className="h-4 w-4" />
+                        </div>
+                        <h4 className="text-xs font-bold text-white">Text to Audio (AI Voiceover)</h4>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Type text to generate ultra-realistic neural speech in Hindi or English.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <select
+                        value={ttsVoice}
+                        onChange={(e) => setTtsVoice(e.target.value)}
+                        className="w-full rounded-xl border border-purple-500/30 bg-black/40 px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none"
+                      >
+                        {ttsVoicesList.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} ({v.gender})
+                          </option>
+                        ))}
+                      </select>
+
+                      <textarea
+                        value={ttsText}
+                        onChange={(e) => setTtsText(e.target.value)}
+                        placeholder="Type script in Hindi or English (e.g. Namaste dosto, is video me...)"
+                        rows={2}
+                        className="w-full rounded-xl border border-white/10 bg-black/40 p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerateTTS}
+                      disabled={isGeneratingTTS || !ttsText.trim()}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-purple-500/50 bg-gradient-to-r from-purple-600 to-indigo-600 py-2 px-3 text-xs font-bold text-white hover:brightness-110 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isGeneratingTTS ? <Wand2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      <span>{isGeneratingTTS ? 'Generating Speech...' : 'Generate AI Voiceover & Apply'}</span>
+                    </button>
+
+                    {ttsError && <p className="text-[11px] text-rose-300">{ttsError}</p>}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* AI SUBTITLES & TRANSCRIBE WORKSTATION */
+              <div className="flex flex-col gap-4 animate-fadeIn">
+                {/* Control Header Card */}
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-5 shadow-xl backdrop-blur-md">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        <FileText className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>AI Speech-to-Text & Subtitles Generator</span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                            Neural STT
+                          </span>
+                        </h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Automatically listen to video audio, transcribe speech with timestamps, and generate downloadable SRT subtitles.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-1.5 text-xs">
+                        <Languages className="h-3.5 w-3.5 text-amber-400" />
+                        <span className="text-slate-400">Language:</span>
+                        <select
+                          value={transcribeLang}
+                          onChange={(e) => setTranscribeLang(e.target.value)}
+                          className="bg-transparent text-amber-200 font-semibold focus:outline-none cursor-pointer"
+                        >
+                          <option value="hi-IN">Hindi (भारत)</option>
+                          <option value="en-IN">English (India)</option>
+                          <option value="en-US">English (US)</option>
+                          <option value="es-ES">Spanish</option>
+                          <option value="fr-FR">French</option>
+                          <option value="de-DE">German</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleTranscribeVideo}
+                        disabled={isTranscribing}
+                        className="flex items-center gap-2 rounded-xl border border-amber-400/50 bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-2 text-xs font-bold text-black hover:brightness-110 transition-all shadow-md shadow-amber-900/30 cursor-pointer disabled:opacity-50"
+                      >
+                        {isTranscribing ? <Wand2 className="h-4 w-4 animate-spin text-black" /> : <Mic className="h-4 w-4 text-black" />}
+                        <span>{isTranscribing ? 'Transcribing Speech...' : 'Generate Subtitles Now'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {transcribeError && (
+                  <div className="rounded-2xl border border-rose-500/40 bg-rose-950/40 p-4 text-xs text-rose-300 flex items-center gap-2.5">
+                    <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+                    <span>{transcribeError}</span>
+                  </div>
+                )}
+
+                {/* Transcription Results */}
+                {transcriptionResult ? (
+                  <div className="space-y-4">
+                    {/* Transcript Summary & Download Toolbar */}
+                    <div className="rounded-2xl border border-white/10 bg-[#0f141f]/90 p-5 shadow-xl backdrop-blur-md space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                          <h5 className="text-xs font-bold text-white">Full Video Transcript</h5>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            ({transcriptionResult.segments.length} segments detected)
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCopyTranscript}
+                            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all cursor-pointer"
+                          >
+                            {isCopiedTranscript ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                            <span>{isCopiedTranscript ? 'Copied!' : 'Copy Text'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadTranscriptFile(transcriptionResult.srt_content, `${metadata.media_id}_subtitles.srt`, 'text/plain')}
+                            className="flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-200 transition-all cursor-pointer"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>Download .SRT</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadTranscriptFile(transcriptionResult.full_text, `${metadata.media_id}_transcript.txt`, 'text/plain')}
+                            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-all cursor-pointer"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>Download .TXT</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleBurnAllSubtitles}
+                            className="flex items-center gap-1.5 rounded-xl border border-cyan-500/50 bg-gradient-to-r from-cyan-600 to-blue-600 px-3.5 py-1.5 text-xs font-bold text-white hover:brightness-110 transition-all shadow-sm cursor-pointer"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            <span>Burn All Subtitles on Video</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Full Transcript Text Area */}
+                      <div className="rounded-xl border border-white/5 bg-black/50 p-4 max-h-36 overflow-y-auto text-xs text-slate-200 leading-relaxed font-sans select-text">
+                        {transcriptionResult.full_text}
+                      </div>
+                    </div>
+
+                    {/* Timestamped Subtitle Segments List */}
+                    <div className="rounded-2xl border border-white/10 bg-[#0f141f]/90 p-5 shadow-xl backdrop-blur-md space-y-3">
+                      <h5 className="text-xs font-bold text-white flex items-center gap-2">
+                        <ListOrdered className="h-4 w-4 text-amber-400" />
+                        <span>Timestamped Subtitle Segments ({transcriptionResult.segments.length})</span>
+                      </h5>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+                        {transcriptionResult.segments.map((seg) => (
+                          <div
+                            key={seg.id}
+                            className="rounded-xl border border-white/5 bg-black/40 p-3 flex flex-col justify-between gap-2 hover:border-amber-500/30 transition-all"
+                          >
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-mono text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                                {seg.timestamp}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (videoRef.current) {
+                                      videoRef.current.currentTime = seg.start;
+                                      setCurrentTime(seg.start);
+                                    }
+                                  }}
+                                  className="text-[10px] text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded cursor-pointer"
+                                >
+                                  Jump Video
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddSubtitleSegmentAsOverlay(seg)}
+                                  className="text-[10px] text-cyan-300 hover:text-cyan-200 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded cursor-pointer font-semibold"
+                                >
+                                  + Overlay
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-white leading-normal font-sans">{seg.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Empty state before transcription */
+                  <div className="rounded-2xl border-2 border-dashed border-amber-500/20 bg-amber-950/5 p-8 text-center flex flex-col items-center justify-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      <Mic className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">Transcribe Video Audio into Subtitles</h4>
+                      <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                        Click "Generate Subtitles Now" to run neural speech recognition on this video. Supports Hindi, Indian English, US English, and more.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3606,6 +4119,14 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                     {audioMode === 'mute' ? 'Muted (Silent)' : audioMode === 'replace' ? 'Replaced' : audioMode === 'mix' ? 'Mixed' : 'Original'}
                   </span>
                 </div>
+                {transcriptionResult && (
+                  <div className="flex justify-between text-slate-400">
+                    <span>Transcribed Subs:</span>
+                    <span className="font-semibold text-amber-300 font-mono">
+                      {transcriptionResult.segments.length} segments
+                    </span>
+                  </div>
+                )}
               </div>
 
               <button

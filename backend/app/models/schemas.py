@@ -148,3 +148,40 @@ class PricingPlan(BaseModel):
     max_resolution: str
     features: List[str]
     is_popular: bool = False
+
+class ExtractAudioRequest(BaseModel):
+    media_id: str
+    format: str = "mp3" # 'mp3', 'wav', 'aac'
+
+class TranscribeSegment(BaseModel):
+    id: int
+    start: float
+    end: float
+    text: str
+    timestamp: str
+
+class TranscribeRequest(BaseModel):
+    media_id: str
+    language: str = "hi-IN" # 'hi-IN', 'en-US', 'en-IN', 'es-ES', 'fr-FR', etc.
+    chunk_duration: int = 6
+
+class TranscribeResponse(BaseModel):
+    media_id: str
+    full_text: str
+    language: str
+    segments: List[TranscribeSegment] = []
+    srt_content: str = ""
+    vtt_content: str = ""
+
+class TTSVoice(BaseModel):
+    id: str
+    name: str
+    language: str
+    gender: str
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "hi-IN-MadhurNeural"
+    rate: str = "+0%"
+    pitch: str = "+0Hz"
+

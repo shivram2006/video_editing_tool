@@ -3,10 +3,14 @@ import time
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from app.config import UPLOAD_DIR, settings
-from app.models.schemas import VideoProcessRequest, VideoJobStatus, HistoryItem, DetectionResponse, AudioUploadResponse
+from app.models.schemas import (
+    VideoProcessRequest, VideoJobStatus, HistoryItem, DetectionResponse, AudioUploadResponse,
+    ExtractAudioRequest, TranscribeRequest, TranscribeResponse, TTSRequest, TTSVoice
+)
 from app.services.video_engine import video_engine
 from app.services.detector import detector
 from app.services.history import history_manager
+from app.services.ai_audio_service import ai_audio_service
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
@@ -249,3 +253,48 @@ async def get_job_status(job_id: str):
                 item.result_url = status.result_url
                 break
     return status
+
+@router.post("/extract-audio", response_model=AudioUploadResponse)
+async def extract_audio_from_video(req: ExtractAudioRequest):
+    """Extract audio stream from an uploaded video as MP3 or WAV"""
+    file_path = find_video_file(req.media_id)
+    try:
+        return ai_audio_service.extract_audio(file_path, output_format=req.format)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audio extraction failed: {str(e)}")
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_video(req: TranscribeRequest):
+    """Transcribe speech in video to text with timestamps, generating SRT/VTT subtitles"""
+    file_path = find_video_file(req.media_id)
+    try:
+        return ai_audio_service.transcribe_video(
+            video_path=file_path,
+            language=req.language,
+            chunk_duration=req.chunk_duration
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+@router.get("/tts-voices")
+async def get_tts_voices():
+    """Get list of natural neural voices for text-to-speech"""
+    return ai_audio_service.get_voices()
+
+@router.post("/text-to-speech", response_model=AudioUploadResponse)
+async def text_to_speech(req: TTSRequest):
+    """Generate high-quality natural voiceover audio from text"""
+    try:
+        return await ai_audio_service.generate_tts(
+            text=req.text,
+            voice=req.voice,
+            rate=req.rate,
+            pitch=req.pitch
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+
