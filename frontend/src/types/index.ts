@@ -45,12 +45,26 @@ export interface InsertClip {
   preview_url?: string;
 }
 
+export interface AudioTrackInfo {
+  audio_id: string;
+  filename: string;
+  original_name: string;
+  url: string;
+  duration_sec: number;
+  file_size: number;
+}
+
 export interface VideoProcessRequest {
   media_id: string;
   boxes?: BoundingBox[];
   tracking_mode?: string;
   temporal_consistency?: boolean;
   preserve_audio?: boolean;
+  audio_mode?: 'original' | 'mute' | 'replace' | 'mix';
+  new_audio_id?: string;
+  new_audio_volume?: number;
+  original_audio_volume?: number;
+  audio_loop?: boolean;
   export_resolution?: string;
   confirm_rights: boolean;
   cut_ranges?: CutRange[];

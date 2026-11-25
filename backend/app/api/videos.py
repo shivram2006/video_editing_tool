@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from app.config import UPLOAD_DIR, settings
-from app.models.schemas import VideoProcessRequest, VideoJobStatus, HistoryItem, DetectionResponse
+from app.models.schemas import VideoProcessRequest, VideoJobStatus, HistoryItem, DetectionResponse, AudioUploadResponse
 from app.services.video_engine import video_engine
 from app.services.detector import detector
 from app.services.history import history_manager
@@ -11,12 +11,63 @@ from app.services.history import history_manager
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".wma"}
 
 def find_video_file(media_id: str) -> Path:
     for p in UPLOAD_DIR.iterdir():
         if p.name == media_id or p.stem == media_id or p.name.startswith(f"{media_id}_") or p.name.startswith(media_id):
             return p
     raise HTTPException(status_code=404, detail=f"Video file '{media_id}' not found in uploads")
+
+def find_audio_file(audio_id: str) -> Path:
+    for p in UPLOAD_DIR.iterdir():
+        if p.name == audio_id or p.stem == audio_id or p.name.startswith(f"{audio_id}_") or p.name.startswith(audio_id):
+            return p
+    raise HTTPException(status_code=404, detail=f"Audio file '{audio_id}' not found in uploads")
+
+@router.post("/upload-audio", response_model=AudioUploadResponse)
+async def upload_audio(file: UploadFile = File(...)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format: {ext}. Supported: MP3, WAV, M4A, AAC, OGG, FLAC, WMA")
+
+    audio_id = str(uuid.uuid4())[:8]
+    filename = f"{audio_id}_{file.filename}"
+    file_path = UPLOAD_DIR / filename
+
+    content = await file.read()
+    if len(content) > settings.MAX_VIDEO_SIZE_MB * 1024 * 1024:
+        raise HTTPException(status_code=400, detail=f"Audio exceeds max size of {settings.MAX_VIDEO_SIZE_MB}MB")
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Probe duration
+    duration = 0.0
+    try:
+        import subprocess, json
+        cmd = [
+            settings.ffprobe_bin,
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            str(file_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            data = json.loads(res.stdout)
+            duration = float(data.get("format", {}).get("duration", 0.0))
+    except Exception:
+        pass
+
+    return AudioUploadResponse(
+        audio_id=audio_id,
+        filename=filename,
+        original_name=file.filename or filename,
+        url=f"/api/uploads/{filename}",
+        duration_sec=round(duration, 2),
+        file_size=len(content)
+    )
 
 @router.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -141,17 +192,25 @@ async def start_video_clean(req: VideoProcessRequest):
 
     file_path = find_video_file(req.media_id)
 
+    # If audio_mode is mute, preserve_audio should be false
+    effective_preserve = req.preserve_audio and (req.audio_mode != "mute")
+
     job_id = video_engine.start_video_processing(
         video_path=file_path,
         media_id=req.media_id,
         boxes=req.boxes or [],
         tracking_mode=req.tracking_mode,
         temporal_consistency=req.temporal_consistency,
-        preserve_audio=req.preserve_audio,
+        preserve_audio=effective_preserve,
         export_resolution=req.export_resolution,
         cut_ranges=req.cut_ranges,
         insert_clips=req.insert_clips,
-        text_overlays=req.text_overlays
+        text_overlays=req.text_overlays,
+        audio_mode=req.audio_mode,
+        new_audio_id=req.new_audio_id,
+        new_audio_volume=req.new_audio_volume,
+        original_audio_volume=req.original_audio_volume,
+        audio_loop=req.audio_loop
     )
 
     # Pre-record in history as processing

@@ -31,11 +31,15 @@ import {
   Edit3,
   Palette,
   FastForward,
+  VolumeX,
+  Music,
+  Headphones,
+  Radio,
 } from 'lucide-react';
 import { VideoTimelineScrubber } from '../components/VideoTimelineScrubber';
 import { ProcessingProgressModal } from '../components/ProcessingProgressModal';
 import { LegalConfirmationModal } from '../components/LegalConfirmationModal';
-import { BoundingBox, VideoMetadata, VideoJobStatus, DetectionResult, CutRange, InsertClip, TextOverlay } from '../types';
+import { BoundingBox, VideoMetadata, VideoJobStatus, DetectionResult, CutRange, InsertClip, TextOverlay, AudioTrackInfo } from '../types';
 import { api } from '../services/api';
 
 interface VideoCleanerProps {
@@ -61,8 +65,8 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
   const [selectTool, setSelectTool] = useState<'draw' | 'select'>('draw');
 
-  // Studio Mode: 'watermark' | 'text' | 'cut_stitch'
-  const [studioMode, setStudioMode] = useState<'watermark' | 'text' | 'cut_stitch'>('watermark');
+  // Studio Mode: 'watermark' | 'text' | 'cut_stitch' | 'audio'
+  const [studioMode, setStudioMode] = useState<'watermark' | 'text' | 'cut_stitch' | 'audio'>('watermark');
 
   // Text Overlays & Replacement state
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
@@ -76,6 +80,18 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
   // Insert Clips state (Intro/Outro)
   const [insertClips, setInsertClips] = useState<InsertClip[]>([]);
   const [isUploadingClip, setIsUploadingClip] = useState<boolean>(false);
+
+  // Audio Replacement & Mixing state
+  const [audioMode, setAudioMode] = useState<'original' | 'mute' | 'replace' | 'mix'>('original');
+  const [uploadedAudio, setUploadedAudio] = useState<AudioTrackInfo | null>(null);
+  const [newAudioVolume, setNewAudioVolume] = useState<number>(1.0);
+  const [originalAudioVolume, setOriginalAudioVolume] = useState<number>(1.0);
+  const [audioLoop, setAudioLoop] = useState<boolean>(true);
+  const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
+  const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
+  const [isPlayingAudioPreview, setIsPlayingAudioPreview] = useState<boolean>(false);
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [interaction, setInteraction] = useState<{
     type: 'draw' | 'move' | 'resize';
@@ -965,6 +981,37 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
     if (selectedBoxId === id) setSelectedBoxId(null);
   };
 
+  // Audio Handlers
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingAudio(true);
+    setAudioUploadError(null);
+    try {
+      const res = await api.uploadAudio(file);
+      setUploadedAudio(res);
+      if (audioMode === 'original' || audioMode === 'mute') {
+        setAudioMode('replace');
+      }
+    } catch (err: any) {
+      setAudioUploadError(err.message || 'Audio upload failed');
+    } finally {
+      setIsUploadingAudio(false);
+      if (audioFileInputRef.current) audioFileInputRef.current.value = '';
+    }
+  };
+
+  const toggleAudioPreview = () => {
+    if (!audioPreviewRef.current) return;
+    if (isPlayingAudioPreview) {
+      audioPreviewRef.current.pause();
+      setIsPlayingAudioPreview(false);
+    } else {
+      audioPreviewRef.current.play();
+      setIsPlayingAudioPreview(true);
+    }
+  };
+
   // Processing trigger
   const handleStartProcess = () => {
     if (!metadata) return;
@@ -972,9 +1019,10 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
       boxes.length === 0 &&
       cutRanges.length === 0 &&
       insertClips.length === 0 &&
-      textOverlays.length === 0
+      textOverlays.length === 0 &&
+      audioMode === 'original'
     ) {
-      setErrorMsg('Please select a watermark region, add a text overlay, mark a cut, or add an intro/outro clip.');
+      setErrorMsg('Please select a watermark region, edit text, mark a cut, or configure audio.');
       return;
     }
     setShowLegalModal(true);
@@ -990,7 +1038,12 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
         boxes,
         tracking_mode: trackingMode,
         temporal_consistency: temporalConsistency,
-        preserve_audio: preserveAudio,
+        preserve_audio: audioMode !== 'mute',
+        audio_mode: audioMode,
+        new_audio_id: uploadedAudio?.audio_id,
+        new_audio_volume: newAudioVolume,
+        original_audio_volume: originalAudioVolume,
+        audio_loop: audioLoop,
         export_resolution: exportResolution,
         confirm_rights: true,
         cut_ranges: cutRanges.length > 0 ? cutRanges : undefined,
@@ -1143,6 +1196,24 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => setStudioMode('audio')}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 px-3 text-xs font-bold transition-all ${
+                  studioMode === 'audio'
+                    ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-md shadow-emerald-500/25 ring-1 ring-emerald-400/40'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Music className="h-4 w-4" />
+                <span>Audio Studio</span>
+                {audioMode !== 'original' && (
+                  <span className="ml-1 rounded-full bg-emerald-950/80 px-1.5 py-0.5 text-[10px] text-emerald-200 border border-emerald-400/30 font-mono">
+                    {audioMode === 'mute' ? 'Muted' : audioMode === 'replace' ? 'Replaced' : 'Mixed'}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Context Toolbar */}
@@ -1254,7 +1325,7 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   Playhead: {formatSec(currentTime)}
                 </div>
               </div>
-            ) : (
+            ) : studioMode === 'cut_stitch' ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/30 bg-rose-950/20 px-4 py-2.5 shadow-xl backdrop-blur-md">
                 <div className="flex items-center gap-2 text-xs font-semibold text-rose-200">
                   <Scissors className="h-4 w-4 text-rose-400" />
@@ -1265,6 +1336,47 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                 </div>
                 <div className="text-[11px] font-mono text-rose-300 bg-rose-900/60 px-2 py-0.5 rounded border border-rose-500/30">
                   Playhead: {formatSec(currentTime)}
+                </div>
+              </div>
+            ) : (
+              /* AUDIO STUDIO TOOLBAR */
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-2.5 shadow-xl backdrop-blur-md">
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-200">
+                  <Music className="h-4 w-4 text-emerald-400" />
+                  <span>Audio Studio:</span>
+                  <span className="text-[11px] text-slate-300 font-normal">
+                    {audioMode === 'mute'
+                      ? '🔇 Sound stripped completely (100% silent video)'
+                      : audioMode === 'replace'
+                      ? '🎧 Original sound replaced with uploaded audio'
+                      : audioMode === 'mix'
+                      ? '🎚️ Blending original dialogue with new background music'
+                      : '🎵 Keeping original video audio stream'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <label className="flex items-center gap-1.5 cursor-pointer rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-2.5 py-1 font-semibold text-emerald-200 hover:bg-emerald-600/30 transition-all">
+                    <Upload className="h-3 w-3" />
+                    <span>{isUploadingAudio ? 'Uploading...' : uploadedAudio ? 'Replace Audio File' : '+ Upload Audio'}</span>
+                    <input
+                      ref={audioFileInputRef}
+                      type="file"
+                      accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.wma"
+                      onChange={handleAudioUpload}
+                      disabled={isUploadingAudio}
+                      className="hidden"
+                    />
+                  </label>
+                  {uploadedAudio && (
+                    <button
+                      type="button"
+                      onClick={toggleAudioPreview}
+                      className="flex items-center gap-1 rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-1 text-emerald-100 font-semibold hover:bg-emerald-500/30"
+                    >
+                      {isPlayingAudioPreview ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      <span>{isPlayingAudioPreview ? 'Pause Audio' : 'Preview Audio'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2625,7 +2737,7 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   </div>
                 )}
               </div>
-            ) : (
+            ) : studioMode === 'cut_stitch' ? (
               /* CUT & STITCH CLIPS STUDIO */
               <div className="flex flex-col gap-4">
                 {/* Cut Segment Marking / Creator Bar */}
@@ -3089,6 +3201,374 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   )}
                 </div>
               </div>
+            ) : (
+              /* AUDIO STUDIO WORKSTATION */
+              <div className="flex flex-col gap-4">
+                {/* Audio Master Control Header */}
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 shadow-xl backdrop-blur-md">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <Headphones className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>Audio Track & Sound Replacement Studio</span>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                            audioMode === 'mute'
+                              ? 'bg-rose-950/80 text-rose-300 border-rose-400/40'
+                              : audioMode === 'replace'
+                              ? 'bg-emerald-950/80 text-emerald-200 border-emerald-400/40'
+                              : audioMode === 'mix'
+                              ? 'bg-cyan-950/80 text-cyan-200 border-cyan-400/40'
+                              : 'bg-white/10 text-slate-300 border-white/20'
+                          }`}>
+                            {audioMode === 'mute' ? '🔇 Mute (Silent Video)' : audioMode === 'replace' ? '🎧 Audio Replaced' : audioMode === 'mix' ? '🎚️ Mixed Audio' : '🎵 Original Audio'}
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Completely remove existing sound from video and upload new background music or voiceovers.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer rounded-xl border border-emerald-500/50 bg-emerald-600/30 hover:bg-emerald-600/50 px-3.5 py-2 text-xs font-bold text-emerald-100 transition-all shadow-md shadow-emerald-900/30">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{isUploadingAudio ? 'Uploading Audio...' : uploadedAudio ? 'Replace Audio File' : '+ Upload New Audio (MP3/WAV)'}</span>
+                      <input
+                        ref={audioFileInputRef}
+                        type="file"
+                        accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.wma"
+                        disabled={isUploadingAudio}
+                        onChange={handleAudioUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* 4 Interactive Audio Mode Selection Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Mode 1: Original Audio */}
+                  <div
+                    onClick={() => setAudioMode('original')}
+                    className={`cursor-pointer rounded-2xl border p-3.5 flex flex-col justify-between gap-2 transition-all shadow-md ${
+                      audioMode === 'original'
+                        ? 'border-emerald-500 bg-emerald-950/40 ring-1 ring-emerald-400/50 shadow-emerald-900/30'
+                        : 'border-white/10 bg-[#12141e]/80 hover:bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                        audioMode === 'original' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-slate-400'
+                      }`}>
+                        <Volume2 className="h-4 w-4" />
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                        audioMode === 'original' ? 'text-emerald-400' : 'text-slate-500'
+                      }`}>
+                        {audioMode === 'original' ? '● Active' : 'Select'}
+                      </span>
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">Keep Original Audio</h5>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Preserves original video sound with 100% lossless FFmpeg copy.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Mode 2: Completely Remove Audio (Mute) */}
+                  <div
+                    onClick={() => setAudioMode('mute')}
+                    className={`cursor-pointer rounded-2xl border p-3.5 flex flex-col justify-between gap-2 transition-all shadow-md ${
+                      audioMode === 'mute'
+                        ? 'border-rose-500 bg-rose-950/40 ring-1 ring-rose-400/50 shadow-rose-900/30'
+                        : 'border-white/10 bg-[#12141e]/80 hover:bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                        audioMode === 'mute' ? 'bg-rose-500/30 text-rose-300' : 'bg-white/5 text-slate-400'
+                      }`}>
+                        <VolumeX className="h-4 w-4" />
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                        audioMode === 'mute' ? 'text-rose-400' : 'text-slate-500'
+                      }`}>
+                        {audioMode === 'mute' ? '● Active' : 'Select'}
+                      </span>
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">Completely Remove Audio</h5>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Strips all sound tracks. Exports a 100% silent video.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Mode 3: Replace Audio Completely */}
+                  <div
+                    onClick={() => setAudioMode('replace')}
+                    className={`cursor-pointer rounded-2xl border p-3.5 flex flex-col justify-between gap-2 transition-all shadow-md ${
+                      audioMode === 'replace'
+                        ? 'border-cyan-500 bg-cyan-950/40 ring-1 ring-cyan-400/50 shadow-cyan-900/30'
+                        : 'border-white/10 bg-[#12141e]/80 hover:bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                        audioMode === 'replace' ? 'bg-cyan-500/30 text-cyan-300' : 'bg-white/5 text-slate-400'
+                      }`}>
+                        <Headphones className="h-4 w-4" />
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                        audioMode === 'replace' ? 'text-cyan-400' : 'text-slate-500'
+                      }`}>
+                        {audioMode === 'replace' ? '● Active' : 'Select'}
+                      </span>
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">Replace Audio Track</h5>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Removes old audio completely and burns in your new uploaded track.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Mode 4: Mix Background Music */}
+                  <div
+                    onClick={() => setAudioMode('mix')}
+                    className={`cursor-pointer rounded-2xl border p-3.5 flex flex-col justify-between gap-2 transition-all shadow-md ${
+                      audioMode === 'mix'
+                        ? 'border-teal-500 bg-teal-950/40 ring-1 ring-teal-400/50 shadow-teal-900/30'
+                        : 'border-white/10 bg-[#12141e]/80 hover:bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                        audioMode === 'mix' ? 'bg-teal-500/30 text-teal-300' : 'bg-white/5 text-slate-400'
+                      }`}>
+                        <Radio className="h-4 w-4" />
+                      </div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                        audioMode === 'mix' ? 'text-teal-400' : 'text-slate-500'
+                      }`}>
+                        {audioMode === 'mix' ? '● Active' : 'Select'}
+                      </span>
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">Mix Audio Streams</h5>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Blends original video audio with new background music.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Uploaded Audio Inspector & Fine-Tuning Panel (shown for replace or mix mode) */}
+                {(audioMode === 'replace' || audioMode === 'mix') && (
+                  <div className="rounded-2xl border border-emerald-500/30 bg-[#0f151c]/90 p-5 shadow-xl backdrop-blur-md animate-fadeIn space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <Music className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">
+                            {audioMode === 'replace' ? 'New Replacement Audio Track' : 'Background Audio Track (Mixing)'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400">
+                            {uploadedAudio
+                              ? `Ready to mux with video (${formatSec(uploadedAudio.duration_sec)} duration)`
+                              : 'Please upload an audio file (MP3, WAV, M4A, AAC, OGG)'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {uploadedAudio && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={toggleAudioPreview}
+                            className="flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-600/30 transition-all shadow-sm cursor-pointer"
+                          >
+                            {isPlayingAudioPreview ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                            <span>{isPlayingAudioPreview ? 'Pause Audio' : 'Preview Audio'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isPlayingAudioPreview && audioPreviewRef.current) {
+                                audioPreviewRef.current.pause();
+                                setIsPlayingAudioPreview(false);
+                              }
+                              setUploadedAudio(null);
+                            }}
+                            className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Audio File Details or Upload Dropzone */}
+                    {uploadedAudio ? (
+                      <div className="flex flex-col gap-4">
+                        {/* Audio Track Info Card */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/20 bg-black/40 p-3 text-xs">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
+                              <Music className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-white text-sm">{uploadedAudio.original_name}</p>
+                              <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                                <span className="font-mono text-emerald-300">Duration: {formatSec(uploadedAudio.duration_sec)}</span>
+                                <span>•</span>
+                                <span>Size: {(uploadedAudio.file_size / (1024 * 1024)).toFixed(2)} MB</span>
+                                <span>•</span>
+                                <span className="text-slate-300">Target Video: {formatSec(metadata.duration_sec)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Hidden Audio player for in-browser preview */}
+                          <audio
+                            ref={audioPreviewRef}
+                            src={uploadedAudio.url}
+                            onEnded={() => setIsPlayingAudioPreview(false)}
+                            className="hidden"
+                          />
+                        </div>
+
+                        {/* Audio Controls Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* New Audio Volume Slider */}
+                          <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-emerald-300">New Audio Track Volume:</span>
+                              <span className="font-mono text-white text-xs bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-400/40">
+                                {Math.round(newAudioVolume * 100)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="2"
+                              step="0.05"
+                              value={newAudioVolume}
+                              onChange={(e) => setNewAudioVolume(parseFloat(e.target.value))}
+                              className="w-full accent-emerald-500 cursor-pointer"
+                            />
+                            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                              <span>0% (Silent)</span>
+                              <span>100% (Normal)</span>
+                              <span>200% (Boosted)</span>
+                            </div>
+                          </div>
+
+                          {/* Original Audio Volume (shown only in Mix Mode) or Loop Settings */}
+                          {audioMode === 'mix' ? (
+                            <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-teal-300">Original Video Audio Volume:</span>
+                                <span className="font-mono text-white text-xs bg-teal-950/80 px-2 py-0.5 rounded border border-teal-400/40">
+                                  {Math.round(originalAudioVolume * 100)}%
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={originalAudioVolume}
+                                onChange={(e) => setOriginalAudioVolume(parseFloat(e.target.value))}
+                                className="w-full accent-teal-500 cursor-pointer"
+                              />
+                              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                                <span>0% (Muted)</span>
+                                <span>50% (Background Dialogue)</span>
+                                <span>100% (Full)</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-white/10 bg-black/40 p-3 flex flex-col justify-between">
+                              <div>
+                                <span className="font-bold text-emerald-300 text-xs">Seamless Audio Looping</span>
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                  If your audio track ({formatSec(uploadedAudio.duration_sec)}) is shorter than your video ({formatSec(metadata.duration_sec)}), loop it automatically until the video finishes.
+                                </p>
+                              </div>
+                              <label className="flex items-center gap-2 mt-2 cursor-pointer text-xs font-semibold text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={audioLoop}
+                                  onChange={(e) => setAudioLoop(e.target.checked)}
+                                  className="h-4 w-4 rounded accent-emerald-500 cursor-pointer"
+                                />
+                                <span>Enable Audio Loop</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Extra Loop Option for Mix Mode */}
+                        {audioMode === 'mix' && (
+                          <div className="rounded-xl border border-white/10 bg-black/40 p-3 flex items-center justify-between">
+                            <div>
+                              <span className="font-bold text-emerald-300 text-xs">Seamless Background Music Looping</span>
+                              <p className="text-[11px] text-slate-400">
+                                Loops background music continuously until the video ends.
+                              </p>
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-white">
+                              <input
+                                type="checkbox"
+                                checked={audioLoop}
+                                onChange={(e) => setAudioLoop(e.target.checked)}
+                                className="h-4 w-4 rounded accent-emerald-500 cursor-pointer"
+                              />
+                              <span>Loop Music</span>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Empty Upload State */
+                      <label className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-950/10 p-8 text-center cursor-pointer hover:bg-emerald-950/20 hover:border-emerald-500/50 transition-all">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          <Music className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">
+                            {isUploadingAudio ? 'Uploading & Analyzing Audio...' : 'Click to Upload Audio File or Drag Here'}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-1">
+                            Supports MP3, WAV, M4A, AAC, OGG, FLAC (Up to 150MB)
+                          </p>
+                        </div>
+                        <input
+                          type="file"
+                          accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.wma"
+                          disabled={isUploadingAudio}
+                          onChange={handleAudioUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+
+                    {audioUploadError && (
+                      <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-300 flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                        <span>{audioUploadError}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -3118,6 +3598,14 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   <span>Added Stitch Clips:</span>
                   <span className="font-semibold text-indigo-300 font-mono">{insertClips.length}</span>
                 </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Audio Track:</span>
+                  <span className={`font-semibold font-mono ${
+                    audioMode === 'mute' ? 'text-rose-400' : audioMode === 'replace' ? 'text-emerald-400' : audioMode === 'mix' ? 'text-teal-400' : 'text-slate-300'
+                  }`}>
+                    {audioMode === 'mute' ? 'Muted (Silent)' : audioMode === 'replace' ? 'Replaced' : audioMode === 'mix' ? 'Mixed' : 'Original'}
+                  </span>
+                </div>
               </div>
 
               <button
@@ -3130,13 +3618,15 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
               </button>
 
               <button
-                disabled={boxes.length === 0 && cutRanges.length === 0 && insertClips.length === 0 && textOverlays.length === 0}
+                disabled={boxes.length === 0 && cutRanges.length === 0 && insertClips.length === 0 && textOverlays.length === 0 && audioMode === 'original'}
                 onClick={handleStartProcess}
-                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 py-3 text-xs font-bold text-white shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 py-3 text-xs font-bold text-white shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
               >
                 <Sparkles className="h-4 w-4" />
                 <span>
-                  {boxes.length > 0 && (cutRanges.length > 0 || insertClips.length > 0 || textOverlays.length > 0)
+                  {audioMode !== 'original' && boxes.length === 0 && cutRanges.length === 0 && insertClips.length === 0 && textOverlays.length === 0
+                    ? audioMode === 'mute' ? 'Export (Mute Video Audio)' : 'Export (Replace Audio)'
+                    : boxes.length > 0 && (cutRanges.length > 0 || insertClips.length > 0 || textOverlays.length > 0 || audioMode !== 'original')
                     ? 'Export Video (Multi-Feature)'
                     : textOverlays.length > 0 && boxes.length === 0 && cutRanges.length === 0 && insertClips.length === 0
                       ? 'Export Video (Text Overlays)'
@@ -3209,19 +3699,82 @@ export const VideoCleanerPage: React.FC<VideoCleanerProps> = ({
                   />
                 </label>
 
-                {/* Audio Preservation */}
-                <label className="flex items-center justify-between cursor-pointer">
-                  <div>
-                    <span className="font-medium text-slate-200">Preserve Audio Track</span>
-                    <p className="text-[10px] text-slate-500">Mux original sound stream via FFmpeg</p>
+                {/* Audio Mode Quick Configuration */}
+                <div className="pt-3 border-t border-white/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Music className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="font-medium text-slate-200 text-xs">Audio Configuration:</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setStudioMode('audio')}
+                      className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                    >
+                      Open Audio Studio
+                    </button>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={preserveAudio}
-                    onChange={(e) => setPreserveAudio(e.target.checked)}
-                    className="h-4 w-4 rounded accent-purple-600 cursor-pointer"
-                  />
-                </label>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setAudioMode('original')}
+                      className={`p-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                        audioMode === 'original'
+                          ? 'border-emerald-500 bg-emerald-500/20 text-emerald-200 font-bold'
+                          : 'border-white/5 bg-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🎵 Original
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAudioMode('mute')}
+                      className={`p-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                        audioMode === 'mute'
+                          ? 'border-rose-500 bg-rose-500/20 text-rose-200 font-bold'
+                          : 'border-white/5 bg-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🔇 Mute All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAudioMode('replace');
+                        setStudioMode('audio');
+                      }}
+                      className={`p-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                        audioMode === 'replace'
+                          ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200 font-bold'
+                          : 'border-white/5 bg-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🎧 Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAudioMode('mix');
+                        setStudioMode('audio');
+                      }}
+                      className={`p-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                        audioMode === 'mix'
+                          ? 'border-teal-500 bg-teal-500/20 text-teal-200 font-bold'
+                          : 'border-white/5 bg-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🎚️ Mix Track
+                    </button>
+                  </div>
+
+                  {uploadedAudio && (
+                    <div className="flex items-center justify-between text-[10px] text-emerald-300 bg-emerald-950/40 p-2 rounded-lg border border-emerald-500/20">
+                      <span className="truncate max-w-[130px] font-semibold">{uploadedAudio.original_name}</span>
+                      <span className="font-mono text-emerald-400">{formatSec(uploadedAudio.duration_sec)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Export Resolution */}

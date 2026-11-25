@@ -11,6 +11,7 @@ import {
   UserProfile,
   PricingPlan,
   SampleMedia,
+  AudioTrackInfo,
 } from '../types';
 
 const API_BASE = '/api';
@@ -91,6 +92,20 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Video upload failed' }));
       throw new Error(err.detail || 'Video upload failed');
+    }
+    return res.json();
+  },
+
+  async uploadAudio(file: File): Promise<AudioTrackInfo> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/videos/upload-audio`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Audio upload failed' }));
+      throw new Error(err.detail || 'Audio upload failed');
     }
     return res.json();
   },

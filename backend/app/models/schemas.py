@@ -73,12 +73,25 @@ class TextOverlay(BaseModel):
     end_time: Optional[float] = None       # Seconds
     font_family: Optional[str] = "Arial"
 
+class AudioUploadResponse(BaseModel):
+    audio_id: str
+    filename: str
+    original_name: str
+    url: str
+    duration_sec: float
+    file_size: int
+
 class VideoProcessRequest(BaseModel):
     media_id: str
     boxes: Optional[List[BoundingBox]] = []
     tracking_mode: str = "optical_flow" # 'static', 'optical_flow', 'csrt'
     temporal_consistency: bool = True
     preserve_audio: bool = True
+    audio_mode: str = "original" # 'original', 'mute', 'replace', 'mix'
+    new_audio_id: Optional[str] = None
+    new_audio_volume: float = 1.0
+    original_audio_volume: float = 1.0
+    audio_loop: bool = True
     export_resolution: str = "original" # 'original', '1080p', '720p'
     confirm_rights: bool = True
     cut_ranges: Optional[List[CutRange]] = None

@@ -99,7 +99,12 @@ class VideoProcessingEngine:
         export_resolution: str = "original",
         cut_ranges: Optional[List[CutRange]] = None,
         insert_clips: Optional[List[InsertClip]] = None,
-        text_overlays: Optional[List[TextOverlay]] = None
+        text_overlays: Optional[List[TextOverlay]] = None,
+        audio_mode: str = "original",
+        new_audio_id: Optional[str] = None,
+        new_audio_volume: float = 1.0,
+        original_audio_volume: float = 1.0,
+        audio_loop: bool = True
     ) -> str:
         job_id = str(uuid.uuid4())[:8]
 
@@ -121,7 +126,11 @@ class VideoProcessingEngine:
         # Run processing thread
         thread = threading.Thread(
             target=self._process_video_thread,
-            args=(job_id, video_path, boxes, tracking_mode, temporal_consistency, preserve_audio, export_resolution, cut_ranges, insert_clips, text_overlays),
+            args=(
+                job_id, video_path, boxes, tracking_mode, temporal_consistency,
+                preserve_audio, export_resolution, cut_ranges, insert_clips, text_overlays,
+                audio_mode, new_audio_id, new_audio_volume, original_audio_volume, audio_loop
+            ),
             daemon=True
         )
         thread.start()
@@ -139,7 +148,12 @@ class VideoProcessingEngine:
         export_resolution: str,
         cut_ranges: Optional[List[CutRange]] = None,
         insert_clips: Optional[List[InsertClip]] = None,
-        text_overlays: Optional[List[TextOverlay]] = None
+        text_overlays: Optional[List[TextOverlay]] = None,
+        audio_mode: str = "original",
+        new_audio_id: Optional[str] = None,
+        new_audio_volume: float = 1.0,
+        original_audio_volume: float = 1.0,
+        audio_loop: bool = True
     ):
         start_time = time.time()
         final_filename = f"cleaned_video_{job_id}.mp4"
@@ -185,26 +199,67 @@ class VideoProcessingEngine:
             has_cuts_or_inserts = bool((cut_ranges and len(cut_ranges) > 0) or (insert_clips and len(insert_clips) > 0))
             has_boxes = bool(boxes and len(boxes) > 0)
             has_text = bool((text_overlays and len(text_overlays) > 0) or any(b.replacement_text for b in (boxes or [])))
+            needs_audio_mod = bool(
+                audio_mode in ("mute", "replace", "mix") and
+                (audio_mode == "mute" or bool(new_audio_id))
+            )
 
-            # 1. If user ONLY wants text overlays (no watermark removal, no cut/stitch):
-            if not has_boxes and not has_cuts_or_inserts and has_text:
-                success = self._apply_text_overlays(
-                    job_id=job_id,
-                    input_video_path=video_path,
+            # 0. If user ONLY wants audio modification (no boxes, no cuts/inserts, no text):
+            if not has_boxes and not has_cuts_or_inserts and not has_text and needs_audio_mod:
+                with self.lock:
+                    self.jobs[job_id].message = f"Applying audio changes ({audio_mode})..."
+                success = self._apply_audio_processing(
+                    current_video_path=video_path,
                     output_video_path=final_path,
-                    text_overlays=text_overlays,
-                    boxes=boxes,
-                    preserve_audio=preserve_audio
+                    original_video_path=video_path,
+                    audio_mode=audio_mode,
+                    new_audio_id=new_audio_id,
+                    new_audio_volume=new_audio_volume,
+                    original_audio_volume=original_audio_volume,
+                    audio_loop=audio_loop
                 )
                 if success:
                     self._finalize_job(job_id, final_filename, start_time)
                 else:
+                    raise RuntimeError("Failed to apply audio modifications to video")
+                return
+
+            # 1. If user ONLY wants text overlays (no watermark removal, no cut/stitch):
+            if not has_boxes and not has_cuts_or_inserts and has_text:
+                text_out = (TEMP_DIR / f"intermediate_text_{job_id}.mp4") if needs_audio_mod else final_path
+                success = self._apply_text_overlays(
+                    job_id=job_id,
+                    input_video_path=video_path,
+                    output_video_path=text_out,
+                    text_overlays=text_overlays,
+                    boxes=boxes,
+                    preserve_audio=preserve_audio
+                )
+                if not success:
                     raise RuntimeError("Failed to apply text overlays into video")
+                if needs_audio_mod:
+                    success = self._apply_audio_processing(
+                        current_video_path=text_out,
+                        output_video_path=final_path,
+                        original_video_path=video_path,
+                        audio_mode=audio_mode,
+                        new_audio_id=new_audio_id,
+                        new_audio_volume=new_audio_volume,
+                        original_audio_volume=original_audio_volume,
+                        audio_loop=audio_loop
+                    )
+                    if text_out.exists():
+                        try: text_out.unlink()
+                        except Exception: pass
+                    if not success:
+                        raise RuntimeError("Failed to apply audio modification after text overlays")
+                self._finalize_job(job_id, final_filename, start_time)
                 return
 
             # 2. If user wants cut/stitch without any watermark removal:
             if not has_boxes and has_cuts_or_inserts:
-                cut_output_path = (TEMP_DIR / f"intermediate_cut_{job_id}.mp4") if has_text else final_path
+                needs_step_after_cut = has_text or needs_audio_mod
+                cut_output_path = (TEMP_DIR / f"intermediate_cut_{job_id}.mp4") if needs_step_after_cut else final_path
                 success = self._apply_cuts_and_inserts(
                     job_id=job_id,
                     input_video_path=video_path,
@@ -219,30 +274,49 @@ class VideoProcessingEngine:
                 )
                 if not success:
                     raise RuntimeError("Failed to apply cut segments or stitch clips")
+                current_step = cut_output_path
                 if has_text:
+                    text_out = (TEMP_DIR / f"intermediate_text_{job_id}.mp4") if needs_audio_mod else final_path
                     success = self._apply_text_overlays(
                         job_id=job_id,
-                        input_video_path=cut_output_path,
-                        output_video_path=final_path,
+                        input_video_path=current_step,
+                        output_video_path=text_out,
                         text_overlays=text_overlays,
                         boxes=boxes,
                         preserve_audio=preserve_audio
                     )
-                    if cut_output_path.exists():
-                        try: cut_output_path.unlink()
+                    if current_step.exists():
+                        try: current_step.unlink()
                         except Exception: pass
                     if not success:
                         raise RuntimeError("Failed to apply text overlays to cut video")
+                    current_step = text_out
+                if needs_audio_mod:
+                    success = self._apply_audio_processing(
+                        current_video_path=current_step,
+                        output_video_path=final_path,
+                        original_video_path=video_path,
+                        audio_mode=audio_mode,
+                        new_audio_id=new_audio_id,
+                        new_audio_volume=new_audio_volume,
+                        original_audio_volume=original_audio_volume,
+                        audio_loop=audio_loop
+                    )
+                    if current_step.exists() and current_step != final_path:
+                        try: current_step.unlink()
+                        except Exception: pass
+                    if not success:
+                        raise RuntimeError("Failed to apply audio modification to cut video")
                 self._finalize_job(job_id, final_filename, start_time)
                 return
 
             # 3. Watermark removal pipeline (with or without cuts/text):
-            needs_step_after_inpaint = has_cuts_or_inserts or has_text
+            needs_step_after_inpaint = has_cuts_or_inserts or has_text or needs_audio_mod
             target_inpaint_path = (TEMP_DIR / f"intermediate_{job_id}.mp4") if needs_step_after_inpaint else final_path
 
-            # If static delogo and NO cuts/inserts and has_text:
+            # If static delogo and NO cuts/inserts and has_text and NOT needs_audio_mod:
             # delogo AND drawtext can run together in 1 single pass straight to final_path!
-            if tracking_mode == "static" and ffmpeg_bin and boxes and not has_cuts_or_inserts:
+            if tracking_mode == "static" and ffmpeg_bin and boxes and not has_cuts_or_inserts and not needs_audio_mod:
                 success = self._run_ffmpeg_static_pipeline(
                     job_id=job_id,
                     ffmpeg_bin=ffmpeg_bin,
@@ -345,12 +419,14 @@ class VideoProcessingEngine:
 
             # 5. Finally, if text overlays or replacement text are requested:
             if has_text:
+                needs_step_after_text = needs_audio_mod
+                text_out = (TEMP_DIR / f"intermediate_text_{job_id}.mp4") if needs_step_after_text else final_path
                 with self.lock:
                     self.jobs[job_id].message = "Rendering custom text overlays..."
                 success = self._apply_text_overlays(
                     job_id=job_id,
                     input_video_path=current_step_path,
-                    output_video_path=final_path,
+                    output_video_path=text_out,
                     text_overlays=text_overlays,
                     boxes=boxes,
                     preserve_audio=preserve_audio
@@ -360,6 +436,27 @@ class VideoProcessingEngine:
                     except Exception: pass
                 if not success:
                     raise RuntimeError("Failed to burn text overlays into video")
+                current_step_path = text_out
+
+            # 6. Apply audio modifications if requested
+            if needs_audio_mod:
+                with self.lock:
+                    self.jobs[job_id].message = f"Applying audio changes ({audio_mode})..."
+                success = self._apply_audio_processing(
+                    current_video_path=current_step_path,
+                    output_video_path=final_path,
+                    original_video_path=video_path,
+                    audio_mode=audio_mode,
+                    new_audio_id=new_audio_id,
+                    new_audio_volume=new_audio_volume,
+                    original_audio_volume=original_audio_volume,
+                    audio_loop=audio_loop
+                )
+                if current_step_path.exists() and current_step_path != video_path and current_step_path != final_path:
+                    try: current_step_path.unlink()
+                    except Exception: pass
+                if not success:
+                    raise RuntimeError("Failed to apply audio modifications to cleaned video")
 
             self._finalize_job(job_id, final_filename, start_time)
 
@@ -407,6 +504,152 @@ class VideoProcessingEngine:
             if p.name == media_id_or_name or p.stem == media_id_or_name or p.name.startswith(f"{media_id_or_name}_") or p.name.startswith(media_id_or_name):
                 return p
         return None
+
+    def _resolve_audio_path(self, audio_id_or_name: str) -> Optional[Path]:
+        if not audio_id_or_name:
+            return None
+        p = Path(audio_id_or_name)
+        if p.exists() and p.is_file():
+            return p
+        for item in UPLOAD_DIR.iterdir():
+            if item.is_file():
+                if item.name == audio_id_or_name or item.stem == audio_id_or_name or item.name.startswith(f"{audio_id_or_name}_") or item.name.startswith(audio_id_or_name):
+                    return item
+        return None
+
+    def _apply_audio_processing(
+        self,
+        current_video_path: Path,
+        output_video_path: Path,
+        original_video_path: Path,
+        audio_mode: str = "original",
+        new_audio_id: Optional[str] = None,
+        new_audio_volume: float = 1.0,
+        original_audio_volume: float = 1.0,
+        audio_loop: bool = True
+    ) -> bool:
+        ffmpeg_bin = settings.ffmpeg_bin
+        if not ffmpeg_bin:
+            return False
+
+        temp_audio_out = None
+        if current_video_path.resolve() == output_video_path.resolve():
+            temp_audio_out = TEMP_DIR / f"temp_audio_mod_{uuid.uuid4().hex[:8]}.mp4"
+            target_out = temp_audio_out
+        else:
+            target_out = output_video_path
+
+        new_audio_path = self._resolve_audio_path(new_audio_id) if new_audio_id else None
+
+        if audio_mode == "mute":
+            # Completely strip audio track from video
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-i", str(current_video_path),
+                "-map", "0:v:0",
+                "-c:v", "copy",
+                "-an",
+                str(target_out)
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            success = res.returncode == 0 and target_out.exists() and target_out.stat().st_size > 500
+
+        elif audio_mode == "replace" and new_audio_path and new_audio_path.exists():
+            # Completely remove old audio and replace with new audio track
+            vol = max(0.0, min(3.0, float(new_audio_volume)))
+            vol_filter = f"volume={vol}"
+
+            if audio_loop:
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", str(current_video_path),
+                    "-stream_loop", "-1",
+                    "-i", str(new_audio_path),
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-af", vol_filter,
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    str(target_out)
+                ]
+            else:
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", str(current_video_path),
+                    "-i", str(new_audio_path),
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-af", f"{vol_filter},apad",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    str(target_out)
+                ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            success = res.returncode == 0 and target_out.exists() and target_out.stat().st_size > 500
+
+        elif audio_mode == "mix" and new_audio_path and new_audio_path.exists():
+            orig_probe = self._probe_file(original_video_path)
+            orig_has_audio = orig_probe.get("has_audio", False)
+            new_vol = max(0.0, min(3.0, float(new_audio_volume)))
+            orig_vol = max(0.0, min(3.0, float(original_audio_volume)))
+
+            if orig_has_audio:
+                filter_complex = (
+                    f"[0:a]volume={orig_vol}[a0];"
+                    f"[1:a]volume={new_vol}[a1];"
+                    f"[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                )
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", str(current_video_path),
+                    "-stream_loop", "-1",
+                    "-i", str(new_audio_path),
+                    "-filter_complex", filter_complex,
+                    "-map", "0:v:0",
+                    "-map", "[aout]",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    str(target_out)
+                ]
+            else:
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-i", str(current_video_path),
+                    "-stream_loop", "-1",
+                    "-i", str(new_audio_path),
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-c:v", "copy",
+                    "-af", f"volume={new_vol}",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    str(target_out)
+                ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            success = res.returncode == 0 and target_out.exists() and target_out.stat().st_size > 500
+
+        else:
+            if current_video_path.resolve() != target_out.resolve():
+                import shutil
+                shutil.copy2(current_video_path, target_out)
+            success = True
+
+        if temp_audio_out and temp_audio_out.exists():
+            if success:
+                import shutil
+                shutil.move(str(temp_audio_out), str(output_video_path))
+            else:
+                try: temp_audio_out.unlink()
+                except Exception: pass
+
+        return success
 
     def _apply_cuts_and_inserts(
         self,
