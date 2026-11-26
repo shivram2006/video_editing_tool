@@ -24,11 +24,27 @@
 - **Rich Typography Controls:** Full control over font size, text color palette, font weights, and background badge padding to match original styling.
 - **Floating Text Layers:** Add independent text annotations and lower-thirds with customizable start/end display durations.
 
-### 4. 🔊 Lossless Audio Synchronization
-- **Direct Stream Copy:** Uses FFmpeg stream copying to maintain 100% of original audio bitrates, channels, and sample rates without lossy re-compression.
-- **Time-Shift Compensation:** Audio timestamps are recalculated and aligned with video frames during cut/stitch operations to eliminate audio drift.
+### 4. 🎵 Complete Audio Studio & Sound Replacement
+- **Mute / Complete Removal:** Strip all audio tracks from a video to produce 100% silent output with ultra-fast stream-copy.
+- **Audio Track Replacement:** Replace the video's original audio with any uploaded MP3, WAV, M4A, or AAC track.
+- **Audio Mixing (Background Music):** Blend dialogue with background music with separate volume sliders (0% to 200%).
+- **Seamless Looping:** Automatically loop background music or audio tracks until the video completes.
 
-### 5. 🖼️ Single Image Restoration Studio
+### 5. 🎙️ Video to Text (AI Speech-to-Text & Subtitles Generator)
+- **Automatic Speech Recognition (STT):** Transcribe spoken words in the video with timestamps into clear text (supports Hindi, Indian English, US English, and more).
+- **Subtitles Export:** Download timestamped `.srt` subtitle files or plain `.txt` transcripts.
+- **1-Click Subtitles Burn:** Instantly convert all timestamped transcript segments into styled on-screen video text overlays.
+
+### 6. ⬇️ Video to Audio (Instant MP3/WAV Extractor)
+- Extract the audio stream from any video file in less than 1 second.
+- Direct in-browser download or one-click load into the Audio Studio for editing.
+
+### 7. 🗣️ Text to Audio (AI Neural Voiceover Generator)
+- Type or paste script text to synthesize natural neural speech.
+- Supports high-quality Microsoft Neural voices (Hindi Male/Female: *Madhur*, *Swara*; English India: *Prabhat*, *Neerja*; English US: *Guy*, *Jenny*).
+- Directly burns into video as replacement sound or background commentary.
+
+### 8. 🖼️ Single Image Restoration Studio
 - **Interactive Canvas:** High-resolution image canvas with pan, zoom, brush masking, and marquee tools.
 - **Telea & Navier-Stokes Inpainting:** Instant restoration for photos, screenshots, and visual assets.
 
@@ -104,7 +120,7 @@ npm install
 # Start Vite development server
 npm run dev
 ```
-The frontend interface will open at `http://localhost:5173` (or the next available port).
+The frontend interface will open at `http://localhost:2006` (or `http://127.0.0.1:2006`).
 
 ---
 
@@ -112,12 +128,15 @@ The frontend interface will open at `http://localhost:5173` (or the next availab
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `POST` | `/api/upload` | Upload video file for editing |
-| `POST` | `/api/clean-video` | Apply timestamp-scoped watermark inpainting & text replacement |
-| `POST` | `/api/stitch-video` | Apply timeline cuts and stitch remaining segments with audio |
-| `POST` | `/api/inpaint` | Restore single image using mask coordinates |
-| `POST` | `/api/detect-text` | Detect on-screen text regions within video frames |
-| `GET`  | `/api/health` | Health check endpoint |
+| `POST` | `/api/videos/upload` | Upload video file for editing |
+| `POST` | `/api/videos/process` | Unified processing: watermark removal, cuts, text overlay, & audio |
+| `POST` | `/api/videos/extract-audio` | Extract audio stream from video as MP3 or WAV |
+| `POST` | `/api/videos/transcribe` | Transcribe speech in video to text & generate SRT/VTT subtitles |
+| `POST` | `/api/videos/text-to-speech` | Synthesize natural neural voiceover audio from text |
+| `GET`  | `/api/videos/tts-voices` | Retrieve available neural voices for Hindi, English, etc. |
+| `POST` | `/api/videos/upload-audio` | Upload custom MP3/WAV/AAC audio track |
+| `POST` | `/api/images/inpaint` | Restore single image using mask coordinates |
+| `GET`  | `/api/system/health` | Health check endpoint |
 
 ---
 
